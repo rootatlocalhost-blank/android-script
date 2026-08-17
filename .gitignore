@@ -1,2 +1,7 @@
 # DON'T MIND ME!
 .git/*
+
+builds
+dists
+
+sources/generated

@@ -1,2 +1,50 @@
 #!/usr/bin/env bash
 clear
+
+mkdir -p "./builds"
+extra_link_flags=()
+if [[ -d "./resources/res" ]]; then
+  rm -rf "./builds/res.zip"
+  aapt2 compile -v \
+    --dir "./resources/res" \
+    -o "./builds/res.zip"
+
+  extra_link_flags+=(-R "./builds/res.zip")
+fi
+rm -rf "./sources/generated"
+aapt2 link -v \
+  -o "./builds/base.apk" \
+  --manifest "./resources/AndroidManifest.xml" \
+  -I "$ANDROID_HOME/platforms/android-36/android.jar" \
+  --java "./sources/generated" \
+  "${extra_link_flags[@]}"
+
+rm -rf "./builds/classes"
+javac -g -deprecation -Xlint \
+  -d "./builds/classes" \
+  --class-path "$ANDROID_HOME/platforms/android-36/android.jar" \
+  --release 17 \
+  --source-path "./sources/java:./sources/generated" \
+  "$(find "./sources/java" -name "MainActivity.java")"
+
+readarray -t class_files < <(find "./builds/classes" -name "*.class")
+rm -rf "./builds/dex"
+mkdir -p "./builds/dex"
+d8 \
+  --lib "$ANDROID_HOME/platforms/android-36/android.jar" \
+  --output "./builds/dex" \
+  "${class_files[@]}"
+
+find "./builds/dex" -name "*.dex" \
+  -exec zip -j "./builds/base.apk" {} +
+
+zipalign -v -f -P 16 4 \
+  "./builds/base.apk" "./builds/aligned.apk"
+
+mkdir -p "./dists"
+apksigner sign -v \
+  --in "./builds/aligned.apk" \
+  --out "./dists/release.apk" \
+  --v4-signing-enabled "false" \
+  --ks "$HOME/.local/.keys/android.keystore" \
+  --ks-pass file:"$HOME/.local/.keys/android-password.txt"
