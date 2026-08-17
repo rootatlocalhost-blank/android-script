@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<resources>
+  <style name="AppTheme" parent="android:Theme.Material.NoActionBar.Fullscreen">
+    <item name="android:windowBackground">#000</item>
+  </style>
+</resources>

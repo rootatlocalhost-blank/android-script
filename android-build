@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -e
 clear
 
 mkdir -p "./builds"
@@ -9,7 +10,7 @@ if [[ -d "./resources/res" ]]; then
     --dir "./resources/res" \
     -o "./builds/res.zip"
 
-  extra_link_flags+=(-R "./builds/res.zip")
+  extra_link_flags+=("./builds/res.zip")
 fi
 rm -rf "./sources/generated"
 aapt2 link -v \
