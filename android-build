@@ -1,51 +1,117 @@
 #!/usr/bin/env bash
-set -e
 clear
 
-mkdir -p "./builds"
-extra_link_flags=()
-if [[ -d "./resources/res" ]]; then
-  rm -rf "./builds/res.zip"
-  aapt2 compile -v \
-    --dir "./resources/res" \
-    -o "./builds/res.zip"
+# Paths
+project_root="$(pwd)"
+project_sources="${project_root}/sources"
+project_resources="${project_root}/resources"
+project_builds="${project_root}/builds"
+project_dists="${project_root}/dists"
 
-  extra_link_flags+=("./builds/res.zip")
-fi
-rm -rf "./sources/generated"
-aapt2 link -v \
-  -o "./builds/base.apk" \
-  --manifest "./resources/AndroidManifest.xml" \
-  -I "$ANDROID_HOME/platforms/android-36/android.jar" \
-  --java "./sources/generated" \
-  "${extra_link_flags[@]}"
+declare -A project=(
+  [entry]="MainActivity"
+  [keystore_path]="/root/.local/.keys/android.keystore"
+  [keystore_password]="/root/.local/.keys/android-password.txt"
+)
+declare -A sources=(
+  [java]="${project_sources}/java"
+  [gen]="${project_sources}/generated"
+)
+declare -A resources=(
+  [manifest]="${project_resources}/AndroidManifest.xml"
+  [res]="${project_resources}/res"
+)
+declare -A builds=(
+  [base_apk]="${project_builds}/base.apk"
+  [aligned_apk]="${project_builds}/aligned.apk"
+  [res]="${project_builds}/res.zip"
+  [classes]="${project_builds}/classes"
+  [dex]="${project_builds}/dex"
+)
+declare -A dists=(
+  [release_apk]="${project_dists}/release.apk"
+)
+declare -A misc=(
+  [platform]="$ANDROID_HOME/platforms/android-36/android.jar"
+)
 
-rm -rf "./builds/classes"
-javac -g -deprecation -Xlint \
-  -d "./builds/classes" \
-  --class-path "$ANDROID_HOME/platforms/android-36/android.jar" \
-  --release 17 \
-  --source-path "./sources/java:./sources/generated" \
-  "$(find "./sources/java" -name "MainActivity.java")"
+# Helper Functions
+create() { mkdir --parents "${@}"; }
+remove() { rm --recursive --force "${@}"; }
+exists() { [[ -e "${1}" ]]; }
 
-readarray -t class_files < <(find "./builds/classes" -name "*.class")
-rm -rf "./builds/dex"
-mkdir -p "./builds/dex"
-d8 \
-  --lib "$ANDROID_HOME/platforms/android-36/android.jar" \
-  --output "./builds/dex" \
-  "${class_files[@]}"
+# Building Functions
+link() {
+  declare -a extra_link_flags=()
+  create "${project_builds}"
 
-find "./builds/dex" -name "*.dex" \
-  -exec zip -j "./builds/base.apk" {} +
+  if exists "${resources[res]}"; then
+    aapt2 compile -v \
+      --dir "${resources[res]}" \
+      -o "${builds[res]}"
+    extra_link_flags+=("${builds[res]}")
+  fi
 
-zipalign -v -f -P 16 4 \
-  "./builds/base.apk" "./builds/aligned.apk"
+  remove "${sources[gen]}"
+  aapt2 link -v \
+    -o "${builds[base_apk]}" \
+    --manifest "${resources[manifest]}" \
+    -I "${misc[platform]}" \
+    --java "${sources[gen]}" \
+    "${extra_link_flags[@]}"
+}
+compile() {
+  remove "${builds[classes]}"
 
-mkdir -p "./dists"
-apksigner sign -v \
-  --in "./builds/aligned.apk" \
-  --out "./dists/release.apk" \
-  --v4-signing-enabled "false" \
-  --ks "$HOME/.local/.keys/android.keystore" \
-  --ks-pass file:"$HOME/.local/.keys/android-password.txt"
+  javac -g -deprecation -Xlint \
+    -d "${builds[classes]}" \
+    --class-path "${misc[platform]}" \
+    --release 17 \
+    --source-path "${sources[java]}:${sources[gen]}" \
+    "$(find "${sources[java]}" -name "${project[entry]}.java")"
+}
+dex() {
+  declare -a class_files=()
+  readarray -t class_files < <(find "${builds[classes]}" -name "*.class")
+
+  remove "${builds[dex]}"
+  create "${builds[dex]}"
+
+  d8 \
+    --lib "${misc[platform]}" \
+    --output "${builds[dex]}" \
+    "${class_files[@]}"
+}
+update() {
+  find "${builds[dex]}" -name "*.dex" \
+    -exec zip -j "${builds[base_apk]}" {} +
+}
+align() {
+  zipalign -v -f -P 16 4 \
+    "${builds[base_apk]}" "${builds[aligned_apk]}"
+}
+sign() {
+  create "${project_dists}"
+
+  apksigner sign -v \
+    --in "${builds[aligned_apk]}" \
+    --out "${dists[release_apk]}" \
+    --v4-signing-enabled "false" \
+    --ks "${project[keystore_path]}" \
+    --ks-pass file:"${project[keystore_password]}"
+}
+
+# Build
+build() (
+  set -e
+
+  link
+  if exists "${sources[java]}"; then
+    compile
+    dex
+    update
+  fi
+  align
+  sign
+)
+build
