@@ -1,17 +1,76 @@
 #!/usr/bin/env bash
 clear
 
-# Paths
+# Root Paths
 project_root="$(pwd)"
+project_file="${project_root}/project.file"
 project_sources="${project_root}/sources"
 project_resources="${project_root}/resources"
 project_builds="${project_root}/builds"
 project_dists="${project_root}/dists"
 
+# Helper Functions
+create() { mkdir --parents "${@}"; }
+remove() { rm --recursive --force "${@}"; }
+exists() { [[ -e "${1}" ]]; }
+get_property() {
+  local block_name="${1%%.*}"
+  local key="${1##*.}:"
+  local value=
+  local inside_block=false
+
+  while read -r line; do
+    if [[ "${line}" =~ ^"$block_name"[[:space:]]\{ ]]; then
+      inside_block=true
+      continue
+    fi
+    if $inside_block && [[ "${line}" =~ ^\}$ ]]; then
+      inside_block=false
+    fi
+
+    if $inside_block; then
+      if [[ "${line}" =~ ^"$key" ]]; then
+        value="${line#"${key}"}"
+        while [[ "${value}" =~ ^[[:space:]] ]]; do
+          value="${value#[[:space:]]}"
+        done
+
+        echo "${value}"
+        break
+      fi
+    fi
+  done <"${project_file}"
+}
+has_files() {
+  local dir="${1}"
+  local ext="*"
+
+  if [[ -n "${2}" ]]; then
+    if [[ "${2}" =~ ^\. ]]; then
+      ext="${ext}${2}"
+    else
+      ext="${2}"
+    fi
+  fi
+
+  declare -a files=()
+  readarray -t files < <(find "${dir}" -type f -name "${ext}")
+
+  ((${#files} > 0))
+}
+
+# Project Paths
 declare -A project=(
-  [entry]="MainActivity"
-  [keystore_path]="/root/.local/.keys/android.keystore"
-  [keystore_password]="/root/.local/.keys/android-password.txt"
+  [name]="$(get_property "application.name")"
+  [id]="$(get_property "application.id")"
+  [entry]="$(get_property "application.entry")"
+  [version_code]="$(get_property "version.code")"
+  [version_name]="$(get_property "version.name")"
+  [min_sdk]="$(get_property "sdk.min")"
+  [target_sdk]="$(get_property "sdk.target")"
+  [compile_sdk]="$(get_property "sdk.compile")"
+  [keystore_path]="$(get_property "keystore.path")"
+  [password_file]="$(get_property "keystore.passwordFile")"
 )
 declare -A sources=(
   [java]="${project_sources}/java"
@@ -32,20 +91,15 @@ declare -A dists=(
   [release_apk]="${project_dists}/release.apk"
 )
 declare -A misc=(
-  [platform]="$ANDROID_HOME/platforms/android-36/android.jar"
+  [platform]="$ANDROID_HOME/platforms/android-${project[compile_sdk]}/android.jar"
 )
-
-# Helper Functions
-create() { mkdir --parents "${@}"; }
-remove() { rm --recursive --force "${@}"; }
-exists() { [[ -e "${1}" ]]; }
 
 # Building Functions
 link() {
   declare -a extra_link_flags=()
   create "${project_builds}"
 
-  if exists "${resources[res]}"; then
+  if exists "${resources[res]}" && has_files "${resources[res]}"; then
     aapt2 compile -v \
       --dir "${resources[res]}" \
       -o "${builds[res]}"
@@ -58,6 +112,12 @@ link() {
     --manifest "${resources[manifest]}" \
     -I "${misc[platform]}" \
     --java "${sources[gen]}" \
+    --version-code "${project[version_code]}" \
+    --version-name "${project[version_name]}" \
+    --replace-version \
+    --min-sdk-version "${project[min_sdk]}" \
+    --target-sdk-version "${project[target_sdk]}" \
+    --rename-manifest-package "${project[id]}" \
     "${extra_link_flags[@]}"
 }
 compile() {
@@ -98,7 +158,7 @@ sign() {
     --out "${dists[release_apk]}" \
     --v4-signing-enabled "false" \
     --ks "${project[keystore_path]}" \
-    --ks-pass file:"${project[keystore_password]}"
+    --ks-pass file:"${project[password_file]}"
 }
 
 # Build
@@ -106,7 +166,7 @@ build() (
   set -e
 
   link
-  if exists "${sources[java]}"; then
+  if exists "${sources[java]}" && has_files "${sources[java]}" "${project[entry]}.java"; then
     compile
     dex
     update

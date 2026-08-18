@@ -1,0 +1,21 @@
+application {
+  name: Example App
+  id: com.example.app
+  entry: MainActivity
+}
+
+version {
+  code: 1
+  name: 1.0
+}
+
+sdk {
+  min: 30
+  target: 33
+  compile: 36
+}
+
+keystore {
+  path: /root/.local/.keys/android.keystore
+  passwordFile: /root/.local/.keys/android-password.txt
+}
